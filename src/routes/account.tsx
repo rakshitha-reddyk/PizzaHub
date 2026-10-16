@@ -1,9 +1,16 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { motion } from "framer-motion";
 import { CreditCard, Heart, MapPin, ShoppingBag, User } from "lucide-react";
-import { useState } from "react";
+import { useState, useEffect } from "react";
+// @ts-ignore
+import { supabase } from "../supabaseClient";
 
 export const Route = createFileRoute("/account")({
+  validateSearch: (search: Record<string, unknown>): { tab?: Tab } => {
+    return {
+      tab: (search.tab as Tab) || undefined,
+    };
+  },
   head: () => ({
     meta: [
       { title: "Account — PizzaHub" },
@@ -24,26 +31,83 @@ const tabs: { id: Tab; label: string; icon: React.ComponentType<{ className?: st
 ];
 
 function AccountPage() {
-  const [authed, setAuthed] = useState(true);
-  const [tab, setTab] = useState<Tab>("profile");
+  const search = Route.useSearch();
+  const [user, setUser] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+  const [tab, setTab] = useState<Tab>(search.tab || "profile");
 
-  if (!authed) return <AuthGate onAuth={() => setAuthed(true)} />;
+ 
+  useEffect(() => {
+    if (search.tab) {
+      setTab(search.tab);
+    }
+  }, [search.tab]);
+
+  useEffect(() => {
+    
+    supabase.auth.getSession().then(({ data: { session } }: { data: { session: any } }) => {
+      setUser(session?.user ?? null);
+      setLoading(false);
+    });
+
+   
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event: string, session: any) => {
+      setUser(session?.user ?? null);
+      setLoading(false);
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
+
+  const handleSignOut = async () => {
+    await supabase.auth.signOut();
+    setUser(null);
+  };
+
+  if (loading) {
+    return (
+      <div className="text-center py-20 font-semibold text-muted-foreground">
+        Loading account... 🍕
+      </div>
+    );
+  }
+
+  
+  if (!user) {
+    return <AuthGate />;
+  }
+
+  const fullName = user.user_metadata?.full_name || "PizzaHub Customer";
+  const email = user.email;
+  const avatarLetter = fullName.charAt(0).toUpperCase();
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-10 sm:px-6">
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div className="flex items-center gap-4">
-          <div className="grid h-14 w-14 place-items-center rounded-full bg-brand text-xl font-black text-brand-foreground">
-            A
+          <div className="grid h-14 w-14 shrink-0 place-items-center rounded-full bg-brand text-xl font-black text-brand-foreground overflow-hidden relative">
+            {user.user_metadata?.avatar_url ? (
+              <img
+                src={user.user_metadata.avatar_url}
+                alt="Profile"
+                className="h-full w-full object-cover"
+                onError={(e) => {
+                  (e.target as HTMLElement).style.display = "none";
+                }}
+              />
+            ) : null}
+            <span className="absolute">{avatarLetter}</span>
           </div>
           <div>
-            <h1 className="text-2xl font-black">Alex Doe</h1>
-            <p className="text-sm text-muted-foreground">alex@example.com · Member since 2024</p>
+            <h1 className="text-2xl font-black">{fullName}</h1>
+            <p className="text-sm text-muted-foreground">{email} · Member since 2024</p>
           </div>
         </div>
         <button
-          onClick={() => setAuthed(false)}
-          className="rounded-full border border-border px-4 py-2 text-sm font-semibold hover:bg-muted"
+          onClick={handleSignOut}
+          className="rounded-full border border-border px-4 py-2 text-sm font-semibold hover:bg-muted transition cursor-pointer"
         >
           Sign out
         </button>
@@ -69,10 +133,10 @@ function AccountPage() {
         >
           {tab === "profile" && (
             <div className="grid gap-4 sm:grid-cols-2">
-              <Field label="Full name" value="Alex Doe" />
-              <Field label="Email" value="alex@example.com" />
-              <Field label="Phone" value="+1 555 342 8891" />
-              <Field label="Birthday" value="1994-04-12" />
+              <Field label="Full name" value={fullName} />
+              <Field label="Email" value={email} />
+              <Field label="Phone number" value="+1 (555) 342-8891" />
+              <Field label="Member status" value="VIP Pizza Lover 🍕" />
             </div>
           )}
           {tab === "orders" && (
@@ -131,9 +195,6 @@ function AccountPage() {
                   <p className="mt-2 text-sm text-muted-foreground">{a.line}</p>
                 </div>
               ))}
-              <button className="rounded-2xl border-2 border-dashed border-border p-4 text-sm font-semibold text-muted-foreground hover:border-brand hover:text-brand">
-                + Add address
-              </button>
             </div>
           )}
           {tab === "payments" && (
@@ -153,9 +214,6 @@ function AccountPage() {
                 </div>
                 <span className="chip">Default</span>
               </div>
-              <button className="w-full rounded-2xl border-2 border-dashed border-border p-4 text-sm font-semibold text-muted-foreground hover:border-brand hover:text-brand">
-                + Add payment method
-              </button>
             </div>
           )}
           {tab === "favorites" && (
@@ -182,55 +240,33 @@ function AccountPage() {
   );
 }
 
-function AuthGate({ onAuth }: { onAuth: () => void }) {
-  const [mode, setMode] = useState<"login" | "signup">("login");
+function AuthGate() {
+  const handleGoogleLogin = async () => {
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: "google",
+      options: {
+        redirectTo: `${window.location.origin}/account`,
+      },
+    });
+    if (error) {
+      console.error("Error logging in with Google:", error.message);
+    }
+  };
+
   return (
     <div className="mx-auto grid max-w-md px-4 py-16 sm:px-6">
-      <div className="rounded-3xl border border-border bg-card p-8 shadow-soft">
-        <div className="flex gap-2 rounded-full bg-muted p-1">
-          {(["login", "signup"] as const).map((m) => (
-            <button
-              key={m}
-              onClick={() => setMode(m)}
-              className={`flex-1 rounded-full py-2 text-sm font-semibold transition ${mode === m ? "bg-background shadow-soft" : "text-muted-foreground"}`}
-            >
-              {m === "login" ? "Sign in" : "Sign up"}
-            </button>
-          ))}
-        </div>
-        <h1 className="mt-6 text-2xl font-black">
-          {mode === "login" ? "Welcome back" : "Create account"}
-        </h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          {mode === "login" ? "Sign in to see your orders." : "Get started with your first order."}
+      <div className="rounded-3xl border border-border bg-card p-8 shadow-soft text-center">
+        <div className="text-6xl mb-4">🍕</div>
+        <h1 className="text-2xl font-black">Welcome back</h1>
+        <p className="mt-1 text-sm text-muted-foreground mb-6">
+          Sign in with your Google account to see your orders and profile.
         </p>
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            onAuth();
-          }}
-          className="mt-6 space-y-3"
+        <button
+          onClick={handleGoogleLogin}
+          className="h-11 w-full rounded-full bg-red-600 hover:bg-red-700 text-white font-semibold text-sm transition shadow-md flex items-center justify-center gap-2 cursor-pointer"
         >
-          {mode === "signup" && (
-            <input
-              placeholder="Full name"
-              className="h-11 w-full rounded-xl border border-border bg-background px-3 text-sm outline-none focus:border-brand focus:ring-4 focus:ring-brand/10"
-            />
-          )}
-          <input
-            placeholder="Email"
-            type="email"
-            className="h-11 w-full rounded-xl border border-border bg-background px-3 text-sm outline-none focus:border-brand focus:ring-4 focus:ring-brand/10"
-          />
-          <input
-            placeholder="Password"
-            type="password"
-            className="h-11 w-full rounded-xl border border-border bg-background px-3 text-sm outline-none focus:border-brand focus:ring-4 focus:ring-brand/10"
-          />
-          <button className="h-11 w-full rounded-full bg-brand text-sm font-semibold text-brand-foreground">
-            {mode === "login" ? "Sign in" : "Create account"}
-          </button>
-        </form>
+          Sign in with Google
+        </button>
       </div>
     </div>
   );
@@ -244,6 +280,7 @@ function Field({ label, value }: { label: string; value: string }) {
       </label>
       <input
         defaultValue={value}
+        readOnly
         className="mt-1 h-11 w-full rounded-xl border border-border bg-background px-3 text-sm outline-none focus:border-brand focus:ring-4 focus:ring-brand/10"
       />
     </div>

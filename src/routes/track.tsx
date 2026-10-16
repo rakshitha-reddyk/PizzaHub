@@ -21,14 +21,72 @@ const steps = [
   { key: "delivered", label: "Delivered", icon: Home, sub: "Enjoy!" },
 ];
 
+const STEP_DURATION = 4000; // 4 seconds per step
+
 function TrackPage() {
   const [active, setActive] = useState(0);
-  useEffect(() => {
-    if (active >= steps.length - 1) return;
-    const t = setTimeout(() => setActive((a) => a + 1), 3500);
-    return () => clearTimeout(t);
-  }, [active]);
+  const [hasActiveOrder, setHasActiveOrder] = useState<boolean | null>(null);
 
+  useEffect(() => {
+    const orderExists = localStorage.getItem("pizzahub_active_order");
+    const orderTimestamp = localStorage.getItem("pizzahub_order_time");
+
+    if (!orderExists || !orderTimestamp) {
+      setHasActiveOrder(false);
+      return;
+    }
+
+    setHasActiveOrder(true);
+
+    // Calculate elapsed time since order was placed
+    const elapsed = Date.now() - parseInt(orderTimestamp, 10);
+    const calculatedStep = Math.min(Math.floor(elapsed / STEP_DURATION), steps.length - 1);
+    setActive(calculatedStep);
+  }, []);
+
+  // Timer to advance steps naturally if user stays on the page, stopping permanently at "Delivered"
+  useEffect(() => {
+    if (!hasActiveOrder || active >= steps.length - 1) return;
+
+    const t = setTimeout(() => {
+      setActive((prev) => {
+        const next = prev + 1;
+        if (next >= steps.length - 1) {
+          // Reached delivered state
+          return steps.length - 1;
+        }
+        return next;
+      });
+    }, STEP_DURATION);
+
+    return () => clearTimeout(t);
+  }, [active, hasActiveOrder]);
+
+  if (hasActiveOrder === null) {
+    return null;
+  }
+
+  if (!hasActiveOrder) {
+    return (
+      <div className="mx-auto flex max-w-4xl justify-center px-4 py-16 sm:px-6">
+        <div className="w-full rounded-3xl border border-border bg-card p-10 text-center shadow-soft">
+          <div className="text-5xl">🍕</div>
+          <h1 className="mt-4 text-3xl font-black">No active orders yet</h1>
+          <p className="mt-2 text-muted-foreground">
+            Browse our menu and place an order to start tracking your delivery.
+          </p>
+          <Link
+            to="/menu"
+            className="mt-6 inline-flex rounded-full bg-brand px-5 py-2.5 text-sm font-semibold text-brand-foreground"
+          >
+            Browse menu
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
+  const isDelivered = active === steps.length - 1;
   const eta = Math.max(3, 24 - active * 5);
 
   return (
@@ -39,8 +97,14 @@ function TrackPage() {
             <span className="chip">
               <Package className="h-3.5 w-3.5 text-brand" /> Order #A2039
             </span>
-            <h1 className="mt-3 text-3xl font-black sm:text-4xl">Your order is on its way</h1>
-            <p className="mt-2 text-muted-foreground">Estimated arrival in ~{eta} minutes</p>
+            <h1 className="mt-3 text-3xl font-black sm:text-4xl">
+              {isDelivered ? "Your order has arrived!" : "Your order is on its way"}
+            </h1>
+            <p className="mt-2 text-muted-foreground">
+              {isDelivered
+                ? "Delivered successfully. Enjoy your meal!"
+                : `Estimated arrival in ~{eta} minutes`}
+            </p>
           </div>
           <motion.div
             key={active}
@@ -70,8 +134,8 @@ function TrackPage() {
                 return (
                   <li key={s.key} className="relative flex items-center gap-4">
                     <motion.div
-                      animate={current ? { scale: [1, 1.15, 1] } : {}}
-                      transition={{ duration: 1.5, repeat: current ? Infinity : 0 }}
+                      animate={current && !isDelivered ? { scale: [1, 1.15, 1] } : {}}
+                      transition={{ duration: 1.5, repeat: current && !isDelivered ? Infinity : 0 }}
                       className={`relative z-10 grid h-12 w-12 shrink-0 place-items-center rounded-full transition-colors ${done ? "bg-brand text-brand-foreground" : "bg-muted text-muted-foreground"}`}
                     >
                       <s.icon className="h-5 w-5" />
@@ -95,12 +159,18 @@ function TrackPage() {
         <div className="mt-10 flex flex-wrap gap-3 border-t border-border pt-6">
           <Link
             to="/menu"
+            onClick={() => {
+              // Optional: Clear active order when starting a new order loop
+              localStorage.removeItem("pizzahub_active_order");
+              localStorage.removeItem("pizzahub_order_time");
+            }}
             className="rounded-full border border-border px-5 py-2.5 text-sm font-semibold hover:bg-muted"
           >
             Order again
           </Link>
           <Link
             to="/account"
+            search={{ tab: "orders" }}
             className="rounded-full bg-ink px-5 py-2.5 text-sm font-semibold text-white"
             style={{ background: "var(--ink)", color: "white" }}
           >
